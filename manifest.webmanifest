@@ -1,0 +1,19 @@
+{
+  "name": "Intervall-Timer",
+  "short_name": "Intervall",
+  "description": "Intervall-Timer mit Musik aus ZIP-Dateien, Ansage und Countdown.",
+  "lang": "de",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0D1015",
+  "theme_color": "#0D1015",
+  "categories": ["health", "fitness", "sports", "music"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

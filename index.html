@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Intervall-Timer</title>
+<meta name="description" content="Intervall-Timer mit Musik aus ZIP-Dateien, Ansage und Countdown.">
+<meta name="theme-color" content="#0D1015">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Intervall">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Big+Shoulders+Display:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Layout: Anzeigetafel oben, die Phase flutet die ganze Tafel mit ihrer Farbe; darunter Steuerung, Musik, Einstellungen. Ab 900px zwei Spalten, Tafel bleibt stehen. */
+  --ground:#0D1015;
+  --panel:#161A21;
+  --line:#272D38;
+  --text:#EDF0F4;
+  --muted:#8B94A3;
+  --ink:#0D1015;
+  --work:#FF5733;
+  --rest:#3AB4F2;
+  --prep:#FFC23D;
+  --done:#8EE6B0;
+  --font-display:"Big Shoulders Display","Arial Narrow","Roboto Condensed",Impact,sans-serif;
+  --font-body:"Archivo",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ground);color:var(--text);font-family:var(--font-body);font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;overscroll-behavior-y:none}
+button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+button:disabled{opacity:.38;cursor:default}
+:focus-visible{outline:3px solid var(--prep);outline-offset:2px}
+.vh{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+svg{display:block}
+
+.app{max-width:1120px;margin:0 auto;padding:max(14px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(56px,calc(env(safe-area-inset-bottom) + 32px)) max(16px,env(safe-area-inset-left));display:grid;gap:22px}
+.left{display:grid;gap:12px;align-content:start}
+.right{display:grid;align-content:start}
+@media (min-width:900px){
+  .app{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:40px;padding-top:max(24px,env(safe-area-inset-top))}
+  .left{position:sticky;top:20px}
+}
+
+.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.top h1{margin:0;font-family:var(--font-display);font-weight:800;font-size:26px;letter-spacing:.05em;text-transform:uppercase}
+.top-info{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
+
+/* Anzeigetafel */
+.board{--phase:var(--panel);--on:var(--text);background:var(--phase);color:var(--on);border-radius:22px;padding:16px 18px 0;overflow:hidden;transition:background-color .35s ease,color .35s ease}
+.board[data-phase="work"]{--phase:var(--work);--on:var(--ink)}
+.board[data-phase="rest"]{--phase:var(--rest);--on:var(--ink)}
+.board[data-phase="prep"]{--phase:var(--prep);--on:var(--ink)}
+.board[data-phase="done"]{--phase:var(--done);--on:var(--ink)}
+.board-top{display:flex;justify-content:space-between;align-items:baseline;gap:4px 12px;flex-wrap:wrap}
+.phase{font-family:var(--font-display);font-weight:900;font-size:34px;line-height:1;letter-spacing:.07em;text-transform:uppercase}
+.round{font-family:var(--font-display);font-weight:800;font-size:24px;line-height:1;letter-spacing:.03em}
+.clock{font-family:var(--font-display);font-weight:900;font-size:clamp(108px,36vw,216px);line-height:.88;display:flex;justify-content:center;margin:12px 0 6px;letter-spacing:0}
+.clock .d{display:inline-block;width:.5em;text-align:center}
+.clock .c{display:inline-block;width:.2em;text-align:center;transform:translateY(-.04em)}
+.board.paused .clock{opacity:.5}
+.segs{display:flex;gap:4px;margin:12px 0 12px}
+.seg{flex:1;height:9px;border-radius:2px;background:currentColor;opacity:.2}
+.seg.done{opacity:.85}
+.seg.now{opacity:.85;animation:pulse 1s ease-in-out infinite alternate}
+@keyframes pulse{from{opacity:.85}to{opacity:.35}}
+.board-meta{display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;font-size:15px;font-weight:600;padding-bottom:14px;font-variant-numeric:tabular-nums}
+.bar{position:relative;height:7px;margin:0 -18px}
+.bar::before{content:"";position:absolute;inset:0;background:currentColor;opacity:.18}
+.bar i{position:absolute;inset:0;background:currentColor;transform-origin:left center;transform:scaleX(1)}
+
+/* Steuerung */
+.controls{display:grid;grid-template-columns:68px 1fr 68px;gap:10px}
+.btn-main{height:68px;border:none;border-radius:18px;background:var(--text);color:var(--ink);font-family:var(--font-display);font-weight:900;font-size:30px;letter-spacing:.09em;text-transform:uppercase}
+.btn-main:active{transform:scale(.985)}
+.btn-icon{height:68px;border-radius:18px;background:var(--panel);border:1px solid var(--line);display:grid;place-items:center}
+
+/* Musikleiste */
+.player{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:12px 12px 12px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center}
+.np{display:grid;gap:2px;min-width:0}
+.np-label{font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.np-label.live{color:var(--rest)}
+.np-title{font-weight:600;overflow-wrap:anywhere;line-height:1.3}
+.player-btns{display:flex;gap:6px}
+.pbtn{width:46px;height:46px;border-radius:14px;border:1px solid var(--line);background:transparent;display:grid;place-items:center}
+.pbtn-main{background:var(--rest);border-color:var(--rest);color:var(--ink)}
+
+/* Einstellungen */
+.section{display:grid;gap:6px;padding:18px 0 20px;border-top:1px solid var(--line)}
+.section:first-child{border-top:none;padding-top:4px}
+@media (min-width:900px){.section:first-child{padding-top:0}}
+.section h2{margin:0 0 4px;font-family:var(--font-display);font-weight:800;font-size:24px;letter-spacing:.06em;text-transform:uppercase}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px}
+.row-label{display:grid;gap:1px;min-width:0}
+.row-label > span{display:flex;align-items:center;gap:9px;font-weight:600}
+.row-label small{color:var(--muted);font-size:13px;line-height:1.35}
+.dot{flex:none;width:11px;height:11px;border-radius:3px}
+.dot-prep{background:var(--prep)}.dot-work{background:var(--work)}.dot-rest{background:var(--rest)}.dot-rounds{background:var(--text)}
+.stepper{display:flex;align-items:center;gap:4px;flex:none}
+.stepper button{width:46px;height:46px;border-radius:14px;background:var(--panel);border:1px solid var(--line);font-size:24px;line-height:1;display:grid;place-items:center;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.stepper input{width:80px;height:46px;text-align:center;background:transparent;border:1px solid transparent;border-radius:12px;color:var(--text);font-family:var(--font-display);font-weight:800;font-size:30px;padding:0;font-variant-numeric:tabular-nums}
+.stepper input:focus{outline:none;border-color:var(--muted);background:var(--panel)}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{min-height:42px;padding:0 16px;border-radius:999px;border:1px solid var(--line);background:transparent;font-weight:600;font-size:15px}
+.chip[aria-checked="true"]{background:var(--text);color:var(--ink);border-color:var(--text)}
+.seg-ctl{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden;flex:none}
+.seg-ctl button{min-width:56px;height:42px;border:none;background:transparent;font-weight:600;font-size:15px;padding:0 10px}
+.seg-ctl button + button{border-left:1px solid var(--line)}
+.seg-ctl button[aria-checked="true"]{background:var(--text);color:var(--ink)}
+.switch{position:relative;flex:none;width:56px;height:34px;border-radius:999px;border:none;background:var(--line);transition:background-color .2s}
+.switch::after{content:"";position:absolute;top:4px;left:4px;width:26px;height:26px;border-radius:50%;background:var(--text);transition:transform .2s}
+.switch[aria-checked="true"]{background:var(--work)}
+.switch[aria-checked="true"]::after{transform:translateX(22px)}
+.preview{display:inline-flex;align-items:center;gap:8px;min-height:46px;padding:0 18px;border-radius:14px;border:1px solid var(--line);background:var(--panel);font-weight:600;justify-self:start;margin-top:6px}
+.note{color:var(--muted);font-size:13px;margin:0}
+
+.vol-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.vol-val{flex:none;white-space:nowrap;font-family:var(--font-display);font-weight:800;font-size:28px;font-variant-numeric:tabular-nums;color:var(--rest)}
+.range{-webkit-appearance:none;appearance:none;width:100%;height:40px;background:transparent;margin:0;--val:30%}
+.range::-webkit-slider-runnable-track{height:8px;border-radius:999px;background:linear-gradient(to right,var(--rest) 0,var(--rest) var(--val),var(--line) var(--val),var(--line) 100%)}
+.range::-moz-range-track{height:8px;border-radius:999px;background:var(--line)}
+.range::-moz-range-progress{height:8px;border-radius:999px;background:var(--rest)}
+.range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:30px;height:30px;border-radius:50%;background:var(--text);border:none;margin-top:-11px;box-shadow:0 1px 5px rgba(0,0,0,.45)}
+.range::-moz-range-thumb{width:30px;height:30px;border-radius:50%;background:var(--text);border:none}
+.ticks{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;margin-top:-4px}
+
+.add{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.addbtn{display:flex;align-items:center;justify-content:center;gap:9px;min-height:54px;padding:8px 12px;border-radius:14px;border:1px solid var(--line);background:var(--panel);font-weight:600;text-align:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.addbtn.primary{background:var(--rest);border-color:var(--rest);color:var(--ink)}
+input[type="file"]:focus-visible + .addbtn{outline:3px solid var(--prep);outline-offset:2px}
+.status{font-size:14px;color:var(--muted);margin:8px 0 0;min-height:1.45em}
+.status.err{color:var(--work)}
+.status.ok{color:var(--done)}
+
+.pl-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;min-height:44px}
+.pl-head strong{font-weight:600}
+.pl-head .count{color:var(--muted);font-weight:500;margin-left:6px;font-variant-numeric:tabular-nums}
+.shuffle{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px}
+.list{list-style:none;margin:6px 0 0;padding:0;display:grid}
+.item{display:grid;grid-template-columns:34px minmax(0,1fr) 40px;align-items:center;gap:6px;border-bottom:1px solid var(--line)}
+.item .n{font-family:var(--font-display);font-weight:800;font-size:19px;color:var(--muted);font-variant-numeric:tabular-nums;display:grid;place-items:center start}
+.item .t{display:grid;gap:1px;text-align:left;background:none;border:none;padding:10px 0;min-width:0}
+.item .t b{font-weight:500;overflow-wrap:anywhere;line-height:1.3}
+.item .t small{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.item.current .n{color:var(--rest)}
+.item.current .t b{font-weight:700}
+.item.failed .t b{text-decoration:line-through;color:var(--muted)}
+.item .x{width:40px;height:40px;border:none;background:transparent;color:var(--muted);display:grid;place-items:center;border-radius:10px}
+.empty{border:1px dashed var(--line);border-radius:14px;padding:16px;color:var(--muted);margin-top:12px}
+.empty b{color:var(--text);font-weight:600}
+.linkbtn{background:none;border:none;color:var(--muted);text-decoration:underline;text-underline-offset:3px;padding:8px 0;font-size:14px;justify-self:start}
+.foot{color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:16px;margin:4px 0 0}
+.install{display:grid;gap:10px;margin-top:16px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:var(--panel);font-size:14px}
+.install p{margin:0}
+.install b{font-weight:600}
+.install-actions{display:flex;gap:10px;flex-wrap:wrap}
+.install-actions button{min-height:42px;padding:0 16px;border-radius:12px;border:1px solid var(--line);background:transparent;font-weight:600;font-size:14px}
+.install-actions .go{background:var(--text);color:var(--ink);border-color:var(--text)}
+
+.dropping .app{outline:3px dashed var(--rest);outline-offset:-8px;border-radius:24px}
+
+@media (max-width:380px){
+  .stepper input{width:66px;font-size:26px}
+  .stepper button{width:42px;height:42px}
+  .add{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  .seg.now{animation:none}
+  .board,.switch,.switch::after{transition:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="left">
+    <header class="top">
+      <h1>Intervall-Timer</h1>
+      <span id="topInfo" class="top-info"></span>
+    </header>
+
+    <section id="board" class="board" data-phase="ready" aria-label="Timer">
+      <div class="board-top">
+        <span id="phaseLabel" class="phase" aria-live="polite">Bereit</span>
+        <span id="roundLabel" class="round">8 Runden</span>
+      </div>
+      <div id="clock" class="clock" role="timer" aria-label="Restzeit 0:40"><span class="d">0</span><span class="c">:</span><span class="d">4</span><span class="d">0</span></div>
+      <div id="segs" class="segs" aria-hidden="true"></div>
+      <div class="board-meta"><span id="nextLabel">Aktiv 0:40 · Pause 0:20</span><span id="totalLabel">Gesamt 8:10</span></div>
+      <div class="bar" aria-hidden="true"><i id="barFill"></i></div>
+    </section>
+
+    <div class="controls">
+      <button id="resetBtn" class="btn-icon" type="button" aria-label="Zurücksetzen" title="Zurücksetzen" disabled>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v4.2h4.2"/></svg>
+      </button>
+      <button id="mainBtn" class="btn-main" type="button">Start</button>
+      <button id="skipBtn" class="btn-icon" type="button" aria-label="Phase überspringen" title="Phase überspringen" disabled>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 5.5l9 6.5-9 6.5z" fill="currentColor"/><path d="M18.5 5.5v13"/></svg>
+      </button>
+    </div>
+
+    <section class="player" aria-label="Musik">
+      <div class="np">
+        <span id="npLabel" class="np-label">Musik</span>
+        <span id="npTitle" class="np-title">Keine Musik geladen</span>
+      </div>
+      <div class="player-btns">
+        <button id="prevBtn" class="pbtn" type="button" aria-label="Vorheriger Titel" disabled>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 5.5l-9 6.5 9 6.5z" fill="currentColor"/><path d="M5.5 5.5v13"/></svg>
+        </button>
+        <button id="playBtn" class="pbtn pbtn-main" type="button" aria-label="Musik abspielen" disabled>
+          <svg id="playIcon" width="20" height="20" viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></svg>
+        </button>
+        <button id="nextBtn" class="pbtn" type="button" aria-label="Nächster Titel" disabled>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 5.5l9 6.5-9 6.5z" fill="currentColor"/><path d="M18.5 5.5v13"/></svg>
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <div class="right">
+    <section class="section" aria-labelledby="h-takt">
+      <h2 id="h-takt">Takt</h2>
+      <div class="row">
+        <label class="row-label" for="f-prep"><span><i class="dot dot-prep"></i>Vorlauf</span><small>Zeit bis zur ersten Runde</small></label>
+        <div class="stepper" data-field="prep"><button type="button" data-d="-1" aria-label="Vorlauf kürzer">−</button><input id="f-prep" type="text" inputmode="numeric" autocomplete="off" value="0:10"><button type="button" data-d="1" aria-label="Vorlauf länger">+</button></div>
+      </div>
+      <div class="row">
+        <label class="row-label" for="f-work"><span><i class="dot dot-work"></i>Aktiv</span><small>Belastung pro Runde</small></label>
+        <div class="stepper" data-field="work"><button type="button" data-d="-1" aria-label="Aktiv kürzer">−</button><input id="f-work" type="text" inputmode="numeric" autocomplete="off" value="0:40"><button type="button" data-d="1" aria-label="Aktiv länger">+</button></div>
+      </div>
+      <div class="row">
+        <label class="row-label" for="f-rest"><span><i class="dot dot-rest"></i>Pause</span><small>Erholung zwischen den Runden</small></label>
+        <div class="stepper" data-field="rest"><button type="button" data-d="-1" aria-label="Pause kürzer">−</button><input id="f-rest" type="text" inputmode="numeric" autocomplete="off" value="0:20"><button type="button" data-d="1" aria-label="Pause länger">+</button></div>
+      </div>
+      <div class="row">
+        <label class="row-label" for="f-rounds"><span><i class="dot dot-rounds"></i>Runden</span></label>
+        <div class="stepper" data-field="rounds"><button type="button" data-d="-1" aria-label="Eine Runde weniger">−</button><input id="f-rounds" type="text" inputmode="numeric" autocomplete="off" value="8"><button type="button" data-d="1" aria-label="Eine Runde mehr">+</button></div>
+      </div>
+      <p class="note">Zeiten in Sekunden eintippen (90 wird zu 1:30) oder mit − und + ändern. Gedrückt halten geht schneller.</p>
+    </section>
+
+    <section class="section" aria-labelledby="h-signal">
+      <h2 id="h-signal">Ton &amp; Ansage</h2>
+      <div id="toneChips" class="chips" role="radiogroup" aria-label="Signalton"></div>
+      <button id="previewBtn" class="preview" type="button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L13 19V5L7.5 9.5z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+        <span id="previewTxt">Probe hören</span>
+      </button>
+      <div class="row">
+        <div class="row-label"><span id="voiceLbl">Ansage „Los“ und „Stopp“</span><small id="voiceNote">Gesprochen beim Wechsel zu Aktiv und Pause</small></div>
+        <button id="voiceSw" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="voiceLbl"></button>
+      </div>
+      <div class="row">
+        <div class="row-label"><span id="cdLbl">Countdown-Ticken</span><small>Letzte Sekunden vor jedem Wechsel</small></div>
+        <div id="cdCtl" class="seg-ctl" role="radiogroup" aria-labelledby="cdLbl">
+          <button type="button" role="radio" data-v="0">Aus</button>
+          <button type="button" role="radio" data-v="3">3 s</button>
+          <button type="button" role="radio" data-v="5">5 s</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-musik">
+      <h2 id="h-musik">Musik</h2>
+      <div class="vol-head">
+        <label class="row-label" for="pauseVol"><span><i class="dot dot-rest"></i>Musik in der Pause</span><small>Gilt auch im Vorlauf. Beim Schieben hörst du die Lautstärke.</small></label>
+        <span id="pauseVolVal" class="vol-val">30 %</span>
+      </div>
+      <input id="pauseVol" class="range" type="range" min="0" max="100" step="5" value="30">
+      <div class="ticks" aria-hidden="true"><span>0 %</span><span>50 %</span><span>100 %</span></div>
+
+      <div class="add">
+        <div>
+          <input id="zipInput" class="vh" type="file" accept=".zip,application/zip,application/x-zip-compressed" multiple>
+          <label for="zipInput" class="addbtn primary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8.5L19 7.5V21H6z"/><path d="M11 3v1.8M11 6.6v1.8M11 10.2V12"/><rect x="9.5" y="13.5" width="3" height="4" rx=".8"/></svg>
+            ZIP öffnen
+          </label>
+        </div>
+        <div>
+          <input id="fileInput" class="vh" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.opus,.flac,.zip" multiple>
+          <label for="fileInput" class="addbtn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5.5l11-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg>
+            Songs hinzufügen
+          </label>
+        </div>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <div id="emptyPl" class="empty"><b>Noch keine Musik.</b> Öffne eine ZIP-Datei mit MP3s oder anderen Songs. Sie wird direkt auf deinem Gerät entpackt, nichts wird hochgeladen.</div>
+
+      <div id="plWrap" hidden>
+        <div class="pl-head">
+          <strong>Playlist<span id="plCount" class="count"></span></strong>
+          <div class="shuffle"><span id="shufLbl">Zufällige Reihenfolge</span><button id="shuffleSw" class="switch" type="button" role="switch" aria-checked="false" aria-labelledby="shufLbl"></button></div>
+        </div>
+        <ol id="list" class="list"></ol>
+        <button id="clearBtn" class="linkbtn" type="button">Alle Titel entfernen</button>
+      </div>
+    </section>
+
+    <p id="foot" class="foot">Musik und Einstellungen bleiben auf diesem Gerät gespeichert, nichts wird hochgeladen. Lass den Bildschirm an, sonst hält dein Gerät Timer und Musik an.</p>
+
+    <div id="installBox" class="install" hidden>
+      <p id="installTxt"></p>
+      <div class="install-actions">
+        <button id="installGo" class="go" type="button" hidden>App installieren</button>
+        <button id="installHide" type="button">Ausblenden</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="lib/zip-no-worker-inflate.min.js"></script>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+
+/* ---------- Einstellungen ---------- */
+const KEY = 'intervall-timer-v1';
+const DEF = { prep:10, work:40, rest:20, rounds:8, tone:'glocke', voice:true, countdown:3, pauseVol:30, shuffle:false };
+const LIMITS = { prep:[0,600], work:[1,3600], rest:[0,3600], rounds:[1,99] };
+const S = Object.assign({}, DEF);
+try {
+  const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+  for (const k in DEF) if (saved && typeof saved[k] === typeof DEF[k]) S[k] = saved[k];
+} catch (e) {}
+function clamp(v, a, b){ v = Number(v); if (!isFinite(v)) v = a; return Math.min(b, Math.max(a, v)); }
+for (const k in LIMITS) S[k] = Math.round(clamp(S[k], LIMITS[k][0], LIMITS[k][1]));
+if (![0,3,5].includes(S.countdown)) S.countdown = 3;
+S.pauseVol = Math.round(clamp(S.pauseVol, 0, 100));
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+function fmt(sec){ sec = Math.max(0, Math.ceil(sec - 1e-6)); const m = Math.floor(sec / 60), s = sec % 60; return m + ':' + String(s).padStart(2, '0'); }
+
+/* ---------- Audio-Grundlage ---------- */
+let ctx = null, master = null, musicGain = null, mediaSrc = null;
+const audio = new Audio();
+audio.preload = 'auto';
+audio.setAttribute('playsinline', '');
+const silentUrl = (() => {
+  const sr = 8000, n = 400, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0,'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8,'WAVE'); w(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,sr,true);
+  v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,n*2,true);
+  return URL.createObjectURL(new Blob([buf], { type:'audio/wav' }));
+})();
+let mediaUnlocked = false, speechUnlocked = false;
+
+function ensureAudio(){
+  if (!ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+    try { ctx = new AC(); } catch (e) { return null; }
+    master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination);
+    musicGain = ctx.createGain(); musicGain.gain.value = 1; musicGain.connect(master);
+    try { mediaSrc = ctx.createMediaElementSource(audio); mediaSrc.connect(musicGain); } catch (e) { mediaSrc = null; }
+    try { const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0); } catch (e) {}
+  }
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  return ctx;
+}
+function unlockMedia(){
+  if (mediaUnlocked) return;
+  mediaUnlocked = true;
+  if (!audio.getAttribute('src')) { audio.src = silentUrl; audio.play().catch(() => {}); }
+}
+function hasRealSrc(){ const s = audio.getAttribute('src'); return !!s && s !== silentUrl; }
+
+let musicLevel = 1;
+function setMusicLevel(v, ramp){
+  musicLevel = v;
+  if (ctx && mediaSrc) {
+    const t = ctx.currentTime, g = musicGain.gain;
+    g.cancelScheduledValues(t); g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(v, t + Math.max(0.01, ramp == null ? 0.6 : ramp));
+  } else { try { audio.volume = v; } catch (e) {} }
+}
+
+/* ---------- Signaltöne ---------- */
+function osc(type, f, t, dur, peak, attack){
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + (attack || 0.006));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + (attack || 0.006) + dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.08);
+}
+const TONES = {
+  glocke(t, p){ const f = 880 * p; [[1,.42,1.6],[2.01,.2,1],[2.76,.12,.7],[5.4,.05,.35]].forEach(([m,a,d]) => osc('sine', f*m, t, d, a)); },
+  piep(t, p){ osc('sine', 1320 * p, t, .26, .5); osc('triangle', 1320 * p, t, .2, .12); },
+  pfiff(t, p){
+    const o = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.value = 2900 * p; lfo.frequency.value = 27; lg.gain.value = 190 * p;
+    lfo.connect(lg); lg.connect(o.frequency); o.connect(g); g.connect(master);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(.38, t + .02);
+    g.gain.setValueAtTime(.38, t + .36); g.gain.exponentialRampToValueAtTime(0.0001, t + .46);
+    o.start(t); lfo.start(t); o.stop(t + .5); lfo.stop(t + .5);
+  },
+  gong(t, p){ const f = 150 * p; [[1,.5,2.8],[1.48,.22,2.1],[2.03,.2,1.7],[2.92,.1,1.1],[4.1,.05,.6]].forEach(([m,a,d]) => osc('sine', f*m, t, d, a, .012)); },
+  holz(t, p){ osc('triangle', 1180 * p, t, .08, .7, .002); osc('sine', 2360 * p, t, .04, .25, .002); }
+};
+const TONE_NAMES = [['glocke','Glocke'],['piep','Piep'],['pfiff','Pfiff'],['gong','Gong'],['holz','Holz']];
+function toneAt(t, p){ (TONES[S.tone] || TONES.glocke)(t, p); }
+function playSignal(kind){
+  if (!ensureAudio()) return;
+  const t = ctx.currentTime + 0.02;
+  if (kind === 'go') toneAt(t, 1);
+  else if (kind === 'stop') toneAt(t, 0.75);
+  else { toneAt(t, 1); toneAt(t + .3, 1.26); toneAt(t + .6, 1.5); }
+}
+function tickAt(t){ osc('sine', 1760, t, .06, .42, .002); }
+function playTick(){ if (ensureAudio()) tickAt(ctx.currentTime + 0.01); }
+
+/* ---------- Sprachansage ---------- */
+const synth = ('speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) ? window.speechSynthesis : null;
+let deVoice = null;
+function pickVoice(){
+  try {
+    const vs = synth.getVoices() || [];
+    deVoice = vs.find(v => /^de([-_]|$)/i.test(v.lang) && v.localService) || vs.find(v => /^de/i.test(v.lang)) || null;
+  } catch (e) {}
+}
+if (synth) { pickVoice(); try { synth.onvoiceschanged = pickVoice; } catch (e) {} }
+function say(text){
+  if (!S.voice || !synth) return;
+  try {
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'de-DE'; if (deVoice) u.voice = deVoice; u.rate = 1.05; u.volume = 1;
+    synth.speak(u);
+  } catch (e) {}
+}
+function unlockSpeech(){
+  if (!synth || speechUnlocked) return;
+  speechUnlocked = true;
+  try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u); } catch (e) {}
+}
+
+/* ---------- Timer ---------- */
+const T = { status:'idle', phase:'ready', round:0, end:0, dur:0, left:0, lastSec:null };
+const PH_LABEL = { ready:'Bereit', prep:'Vorlauf', work:'Aktiv', rest:'Pause', done:'Fertig' };
+function phaseDur(ph){ return (ph === 'prep' ? S.prep : ph === 'work' ? S.work : ph === 'rest' ? S.rest : 0) * 1000; }
+function nextPhase(ph, r){
+  if (ph === 'ready' || ph === 'prep') return { phase:'work', round:1 };
+  if (ph === 'work') return r >= S.rounds ? { phase:'done', round:r } : (S.rest > 0 ? { phase:'rest', round:r } : { phase:'work', round:r + 1 });
+  if (ph === 'rest') return r >= S.rounds ? { phase:'done', round:r } : { phase:'work', round:r + 1 };
+  return { phase:'done', round:r };
+}
+function levelFor(){
+  if ((T.status === 'running' || T.status === 'paused') && (T.phase === 'rest' || T.phase === 'prep')) return S.pauseVol / 100;
+  return 1;
+}
+function applyLevel(ramp){ setMusicLevel(levelFor(), ramp); }
+
+function enter(phase, round, at, quiet){
+  T.phase = phase; T.round = round; T.dur = phaseDur(phase); T.end = at + T.dur; T.lastSec = Math.ceil(T.dur / 1000);
+  if (phase === 'done') {
+    T.status = 'done';
+    if (!quiet) { playSignal('done'); say('Geschafft!'); }
+    finishMusic(); keepAwake(false);
+    return;
+  }
+  if (!quiet) {
+    if (phase === 'work') { playSignal('go'); say(round === S.rounds && S.rounds > 1 ? 'Letzte Runde. Los!' : 'Los!'); }
+    else if (phase === 'rest') { playSignal('stop'); say('Stopp!'); }
+  }
+  applyLevel(phase === 'prep' ? 0.05 : 0.6);
+}
+
+function startFresh(){
+  clearTimeout(fadeTimer);
+  T.status = 'running';
+  const now = performance.now();
+  if (S.prep > 0) enter('prep', 0, now); else enter('work', 1, now);
+  keepAwake(true);
+  musicForTimer();
+  render();
+}
+function halt(){
+  if (T.status !== 'running') return;
+  T.left = Math.max(0, T.end - performance.now());
+  T.status = 'paused';
+  P.resumeOnContinue = !audio.paused && hasRealSrc();
+  audio.pause();
+  if (synth) try { synth.cancel(); } catch (e) {}
+  keepAwake(false);
+  render();
+}
+function resume(){
+  if (T.status !== 'paused') return;
+  T.end = performance.now() + T.left;
+  T.status = 'running';
+  if (P.resumeOnContinue) audio.play().catch(() => {});
+  keepAwake(true);
+  render();
+}
+function resetTimer(){
+  T.status = 'idle'; T.phase = 'ready'; T.round = 0;
+  clearTimeout(fadeTimer);
+  audio.pause();
+  setMusicLevel(1, 0.05);
+  if (synth) try { synth.cancel(); } catch (e) {}
+  keepAwake(false);
+  render();
+}
+function skipPhase(){
+  if (T.status !== 'running' && T.status !== 'paused') return;
+  const nx = nextPhase(T.phase, T.round), now = performance.now();
+  if (T.status === 'paused') { enter(nx.phase, nx.round, now, true); if (T.status === 'paused') T.left = T.dur; }
+  else enter(nx.phase, nx.round, now);
+  render();
+}
+function tick(){
+  if (T.status !== 'running') return;
+  const now = performance.now();
+  let guard = 0;
+  while (T.status === 'running' && now >= T.end && guard++ < 1000) {
+    const nx = nextPhase(T.phase, T.round);
+    const quiet = nx.phase !== 'done' && (T.end + phaseDur(nx.phase)) <= now;
+    enter(nx.phase, nx.round, T.end, quiet);
+  }
+  if (T.status === 'running') {
+    const sec = Math.ceil((T.end - now) / 1000);
+    if (sec !== T.lastSec) {
+      T.lastSec = sec;
+      if (S.countdown > 0 && sec >= 1 && sec <= S.countdown && T.dur / 1000 > sec) playTick();
+    }
+  }
+  render();
+}
+setInterval(tick, 50);
+
+let wake = null;
+async function keepAwake(on){
+  try {
+    if (on) {
+      if (!wake && navigator.wakeLock) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); }
+    } else if (wake) { const w = wake; wake = null; await w.release(); }
+  } catch (e) { wake = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+    if (T.status === 'running') keepAwake(true);
+    tick();
+  }
+});
+
+/* ---------- Anzeige ---------- */
+const board = $('#board'), clock = $('#clock'), segs = $('#segs');
+let lastClock = '', lastSegKey = '';
+function remainingMs(){
+  if (T.status === 'running') return Math.max(0, T.end - performance.now());
+  if (T.status === 'paused') return T.left;
+  return 0;
+}
+function fullMs(){ return (S.prep + S.rounds * S.work + (S.rounds - 1) * S.rest) * 1000; }
+function totalLeftMs(){
+  if (T.status === 'idle') return fullMs();
+  if (T.status === 'done') return 0;
+  let sum = remainingMs(), ph = T.phase, r = T.round, g = 0;
+  while (g++ < 400) { const nx = nextPhase(ph, r); if (nx.phase === 'done') break; sum += phaseDur(nx.phase); ph = nx.phase; r = nx.round; }
+  return sum;
+}
+function renderSegs(){
+  const n = S.rounds, key = [n, T.round, T.phase, T.status].join('|');
+  if (key === lastSegKey) return;
+  lastSegKey = key;
+  segs.hidden = n > 40;
+  if (segs.childElementCount !== n) {
+    const f = document.createDocumentFragment();
+    for (let i = 0; i < n; i++) { const s = document.createElement('i'); s.className = 'seg'; f.appendChild(s); }
+    segs.replaceChildren(f);
+  }
+  Array.from(segs.children).forEach((s, i) => {
+    const r = i + 1; let st = '';
+    if (T.status === 'done') st = 'done';
+    else if (T.status !== 'idle') {
+      if (r < T.round || (r === T.round && T.phase === 'rest')) st = 'done';
+      else if (r === T.round && T.phase === 'work') st = 'now';
+    }
+    s.className = 'seg' + (st ? ' ' + st : '');
+  });
+}
+function render(){
+  const ph = T.status === 'idle' ? 'ready' : T.phase;
+  board.dataset.phase = ph;
+  board.classList.toggle('paused', T.status === 'paused');
+  $('#phaseLabel').textContent = PH_LABEL[ph] + (T.status === 'paused' ? ' · angehalten' : '');
+
+  const ms = T.status === 'idle' ? S.work * 1000 : remainingMs();
+  const txt = fmt(ms / 1000);
+  if (txt !== lastClock) {
+    lastClock = txt;
+    clock.innerHTML = Array.from(txt).map(ch => ch === ':' ? '<span class="c">:</span>' : '<span class="d">' + ch + '</span>').join('');
+    clock.setAttribute('aria-label', 'Restzeit ' + txt);
+  }
+
+  let roundTxt;
+  if (T.status === 'idle') roundTxt = S.rounds + (S.rounds === 1 ? ' Runde' : ' Runden');
+  else if (T.status === 'done') roundTxt = S.rounds + '/' + S.rounds;
+  else if (T.phase === 'prep') roundTxt = 'Gleich Runde 1';
+  else roundTxt = 'Runde ' + T.round + '/' + S.rounds;
+  $('#roundLabel').textContent = roundTxt;
+
+  renderSegs();
+
+  let nextTxt;
+  if (T.status === 'idle') nextTxt = 'Aktiv ' + fmt(S.work) + (S.rest > 0 ? ' · Pause ' + fmt(S.rest) : '');
+  else if (T.status === 'done') nextTxt = 'Gut gemacht!';
+  else {
+    const nx = nextPhase(T.phase, T.round);
+    if (nx.phase === 'done') nextTxt = 'Danach: Fertig';
+    else if (nx.phase === 'work') nextTxt = 'Danach: ' + (nx.round === S.rounds && S.rounds > 1 ? 'letzte Runde ' : 'Aktiv ') + fmt(S.work);
+    else nextTxt = 'Danach: Pause ' + fmt(S.rest);
+  }
+  $('#nextLabel').textContent = nextTxt;
+  $('#totalLabel').textContent = T.status === 'idle' ? 'Gesamt ' + fmt(fullMs() / 1000)
+    : T.status === 'done' ? 'Dauer ' + fmt(fullMs() / 1000)
+    : 'Noch ' + fmt(totalLeftMs() / 1000);
+
+  const frac = T.status === 'idle' ? 1 : T.status === 'done' ? 0 : (T.dur > 0 ? ms / T.dur : 0);
+  $('#barFill').style.transform = 'scaleX(' + Math.max(0, Math.min(1, frac)).toFixed(4) + ')';
+
+  const mb = $('#mainBtn');
+  const label = T.status === 'running' ? 'Halt' : T.status === 'paused' ? 'Weiter' : T.status === 'done' ? 'Neu starten' : 'Start';
+  if (mb.textContent !== label) mb.textContent = label;
+  $('#resetBtn').disabled = T.status === 'idle';
+  $('#skipBtn').disabled = !(T.status === 'running' || T.status === 'paused');
+}
+
+/* ---------- Musik ---------- */
+const AUDIO_EXT = { mp3:'audio/mpeg', m4a:'audio/mp4', mp4:'audio/mp4', aac:'audio/aac', wav:'audio/wav', ogg:'audio/ogg', oga:'audio/ogg', opus:'audio/ogg', flac:'audio/flac', webm:'audio/webm', aif:'audio/aiff', aiff:'audio/aiff', caf:'audio/x-caf' };
+const P = { tracks:[], order:[], currentId:null, token:0, failStreak:0, failedToken:-1, nextId:1, resumeOnContinue:false };
+const urlCache = new Map(), pending = new Map();
+let fadeTimer = null, levelPreviewTimer = null;
+
+function extOf(name){ const i = name.lastIndexOf('.'); return i > 0 ? name.slice(i + 1).toLowerCase() : ''; }
+function titleOf(name){ const base = name.split('/').pop(); const i = base.lastIndexOf('.'); return (i > 0 ? base.slice(0, i) : base).replace(/_/g, ' ').trim() || base; }
+function isZip(f){ return extOf(f.name) === 'zip' || /zip/i.test(f.type || ''); }
+function isAudio(f){ return (f.type || '').startsWith('audio/') || extOf(f.name) in AUDIO_EXT; }
+function findTrack(id){ return P.tracks.find(t => t.id === id) || null; }
+function currentTrack(){ return findTrack(P.currentId); }
+function shuffled(a){ for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function rebuildOrder(){
+  const ids = P.tracks.map(t => t.id);
+  if (S.shuffle) {
+    const rest = shuffled(ids.filter(id => id !== P.currentId));
+    P.order = ids.includes(P.currentId) ? [P.currentId].concat(rest) : rest;
+  } else P.order = ids;
+}
+function neighborId(dir){
+  const n = P.order.length; if (!n) return null;
+  const i = P.order.indexOf(P.currentId);
+  if (i < 0) return P.order[0];
+  return P.order[(i + dir + n) % n];
+}
+
+function urlFor(tr){
+  if (urlCache.has(tr.id)) return Promise.resolve(urlCache.get(tr.id));
+  if (pending.has(tr.id)) return pending.get(tr.id);
+  const p = (async () => {
+    let blob;
+    if (tr.file) blob = tr.file.type ? tr.file : tr.file.slice(0, tr.file.size, tr.mime);
+    else blob = await tr.entry.getData(new zip.BlobWriter(tr.mime));
+    const url = URL.createObjectURL(blob);
+    if (!findTrack(tr.id)) { URL.revokeObjectURL(url); throw new Error('removed'); }
+    urlCache.set(tr.id, url);
+    return url;
+  })();
+  pending.set(tr.id, p);
+  p.then(() => pending.delete(tr.id), () => pending.delete(tr.id));
+  return p;
+}
+function trimCache(){
+  const keep = new Set([P.currentId, neighborId(1), neighborId(-1)]);
+  for (const [id, url] of Array.from(urlCache)) {
+    if (!keep.has(id)) { URL.revokeObjectURL(url); urlCache.delete(id); }
+  }
+}
+function prepare(id){ const tr = findTrack(id); if (tr && !tr.failed && !urlCache.has(id)) urlFor(tr).catch(() => {}); }
+
+async function playTrack(id){
+  const tr = findTrack(id); if (!tr) return;
+  clearTimeout(fadeTimer);
+  P.currentId = id;
+  const token = ++P.token;
+  renderPlayer(); renderList();
+  let url;
+  try { url = await urlFor(tr); }
+  catch (e) { if (token === P.token) trackFailed(token); return; }
+  if (token !== P.token) return;
+  audio.src = url;
+  applyLevel(0.05);
+  try { await audio.play(); P.failStreak = 0; }
+  catch (e) {
+    if (token !== P.token) return;
+    if (e && e.name === 'NotAllowedError') setStatus('Tippe auf Abspielen, damit die Musik startet.');
+    else if (!e || e.name !== 'AbortError') trackFailed(token);
+  }
+  renderPlayer(); renderList();
+  trimCache(); prepare(neighborId(1));
+}
+function trackFailed(token){
+  if (P.failedToken === token) return;
+  P.failedToken = token;
+  const tr = currentTrack(); if (tr) tr.failed = true;
+  P.failStreak++;
+  renderList();
+  if (P.failStreak >= P.tracks.length) {
+    audio.pause();
+    setStatus('Diese Titel kann dein Gerät nicht abspielen. Am sichersten sind MP3 und M4A.', 'err');
+    renderPlayer();
+    return;
+  }
+  playTrack(neighborId(1));
+}
+audio.addEventListener('ended', () => { if (hasRealSrc()) playTrack(neighborId(1)); });
+audio.addEventListener('error', () => { if (hasRealSrc()) trackFailed(P.token); });
+audio.addEventListener('play', () => { renderPlayer(); renderList(); });
+audio.addEventListener('pause', () => { renderPlayer(); renderList(); });
+
+function musicForTimer(){
+  if (!P.tracks.length) return;
+  if (!audio.paused && hasRealSrc()) { applyLevel(0.3); return; }
+  if (P.currentId != null && hasRealSrc()) { applyLevel(0.05); audio.play().catch(() => {}); }
+  else playTrack(P.currentId != null ? P.currentId : P.order[0]);
+}
+function finishMusic(){
+  if (audio.paused) { setMusicLevel(1, 0.05); return; }
+  setMusicLevel(0, 3);
+  clearTimeout(fadeTimer);
+  fadeTimer = setTimeout(() => { audio.pause(); setMusicLevel(1, 0.05); }, 3200);
+}
+function togglePlay(){
+  ensureAudio(); unlockMedia();
+  if (!P.tracks.length) return;
+  clearTimeout(fadeTimer);
+  if (!audio.paused && hasRealSrc()) { audio.pause(); P.resumeOnContinue = false; return; }
+  if (T.status === 'paused') P.resumeOnContinue = true;
+  if (P.currentId != null && hasRealSrc()) { applyLevel(0.05); audio.play().catch(() => {}); }
+  else playTrack(P.currentId != null ? P.currentId : P.order[0]);
+}
+function skipTrack(dir){
+  ensureAudio(); unlockMedia();
+  if (!P.tracks.length) return;
+  if (dir < 0 && hasRealSrc() && audio.currentTime > 3) { audio.currentTime = 0; return; }
+  P.failStreak = 0;
+  playTrack(neighborId(dir));
+}
+
+function addTracks(list){
+  for (const t of list) P.tracks.push(Object.assign({ id:P.nextId++, failed:false }, t));
+  rebuildOrder();
+  if (P.currentId == null && P.order.length) P.currentId = P.order[0];
+  renderList(); renderPlayer();
+  if (T.status === 'running' && audio.paused && !hasRealSrc()) musicForTimer();
+}
+/* ---------- Musik dauerhaft speichern (IndexedDB) ---------- */
+const store = (() => {
+  let dbp = null;
+  function open(){
+    if (dbp) return dbp;
+    dbp = new Promise((res, rej) => {
+      try {
+        const r = indexedDB.open('intervall-musik', 1);
+        r.onupgradeneeded = () => { r.result.createObjectStore('sources', { keyPath:'id' }); };
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+        r.onblocked = () => rej(new Error('blocked'));
+      } catch (e) { rej(e); }
+    });
+    return dbp;
+  }
+  function run(mode, fn){
+    return open().then(db => new Promise((res, rej) => {
+      const t = db.transaction('sources', mode), st = t.objectStore('sources');
+      let out;
+      const r = fn(st);
+      if (r) r.onsuccess = () => { out = r.result; };
+      t.oncomplete = () => res(out);
+      t.onerror = () => rej(t.error);
+      t.onabort = () => rej(t.error || new Error('abort'));
+    }));
+  }
+  return {
+    all: () => run('readonly', st => st.getAll()),
+    put: rec => run('readwrite', st => st.put(rec)),
+    del: id => run('readwrite', st => st.delete(id)),
+    clear: () => run('readwrite', st => st.clear())
+  };
+})();
+const sources = new Map();
+const EXCL_KEY = 'intervall-entfernt-v1';
+function loadExcluded(){ try { return JSON.parse(localStorage.getItem(EXCL_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function saveExcluded(m){ try { localStorage.setItem(EXCL_KEY, JSON.stringify(m)); } catch (e) {} }
+function newSourceId(){ return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+let persistAsked = false;
+function persistSource(src){
+  if (!persistAsked) {
+    persistAsked = true;
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) {}
+  }
+  return store.put({ id:src.id, name:src.name, kind:src.kind, blob:src.blob, added:src.added }).catch(e => {
+    const full = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''));
+    setStatus(full ? 'Der Speicher ist voll. Die Musik läuft, bleibt aber nur geladen, bis du die App schließt.'
+                   : 'Die Musik konnte nicht dauerhaft gespeichert werden. Sie bleibt geladen, bis du die App schließt.', 'err');
+  });
+}
+function fileTrack(src){
+  const f = src.blob;
+  return { file:f, title:titleOf(src.name), mime:f.type || AUDIO_EXT[extOf(src.name)] || 'audio/mpeg', source:'Einzeldatei', sourceId:src.id, key:src.name };
+}
+async function zipTracks(src){
+  const entries = await new zip.ZipReader(new zip.BlobReader(src.blob)).getEntries();
+  const excl = new Set(src.excluded || []);
+  let locked = 0;
+  const found = [];
+  for (const e of entries) {
+    if (e.directory) continue;
+    const path = e.filename || '', base = path.split('/').pop();
+    if (!base || base.startsWith('._') || base.startsWith('.') || /(^|\/)__MACOSX\//.test(path)) continue;
+    const ext = extOf(base);
+    if (!(ext in AUDIO_EXT) || excl.has(path)) continue;
+    if (e.encrypted) { locked++; continue; }
+    found.push({ entry:e, path, title:titleOf(base), mime:AUDIO_EXT[ext] });
+  }
+  found.sort((a, b) => a.path.localeCompare(b.path, 'de', { numeric:true, sensitivity:'base' }));
+  return { locked, tracks: found.map(f => ({ entry:f.entry, title:f.title, mime:f.mime, source:src.name, sourceId:src.id, key:f.path })) };
+}
+async function restoreMusic(){
+  let recs;
+  try { recs = await store.all(); }
+  catch (e) {
+    $('#foot').textContent = 'Deine Einstellungen werden gespeichert. Die Musik bleibt nur geladen, solange die Seite offen ist. Lass den Bildschirm an, sonst hält dein Gerät Timer und Musik an.';
+    return;
+  }
+  if (!recs || !recs.length) return;
+  recs.sort((a, b) => (a.added || 0) - (b.added || 0));
+  setStatus('Lade deine Musik …');
+  const excl = loadExcluded(), all = [];
+  let lost = 0;
+  for (const src of recs) {
+    if (!src || !src.blob) { lost++; store.del(src && src.id).catch(() => {}); continue; }
+    if (src.kind === 'zip') {
+      if (!window.zip) continue;
+      src.excluded = excl[src.id] || [];
+      try {
+        const r = await zipTracks(src);
+        if (r.tracks.length) { sources.set(src.id, src); all.push(...r.tracks); }
+        else store.del(src.id).catch(() => {});
+      } catch (e) { lost++; store.del(src.id).catch(() => {}); }
+    } else { sources.set(src.id, src); all.push(fileTrack(src)); }
+  }
+  if (all.length) addTracks(all);
+  if (lost) setStatus(lost + ' gespeicherte Datei(en) waren nicht mehr lesbar. Bitte neu hinzufügen.', 'err');
+  else setStatus(all.length ? all.length + ' Titel geladen.' : '', all.length ? 'ok' : '');
+}
+
+async function addFiles(fileList){
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  const zips = files.filter(isZip), songs = files.filter(f => !isZip(f) && isAudio(f));
+  const other = files.length - zips.length - songs.length;
+  if (songs.length) {
+    const now = Date.now(), list = [];
+    songs.forEach((f, i) => {
+      const src = { id:newSourceId(), name:f.name, kind:'file', blob:f, added:now + i };
+      sources.set(src.id, src);
+      list.push(fileTrack(src));
+      persistSource(src);
+    });
+    addTracks(list);
+    setStatus(songs.length + ' Titel hinzugefügt.' + (other ? ' ' + other + ' Datei(en) waren keine Musik.' : ''), 'ok');
+  } else if (other && !zips.length) setStatus('Das waren keine Musikdateien. Wähle MP3, M4A, WAV oder eine ZIP-Datei.', 'err');
+  for (const z of zips) await addZip(z);
+}
+async function addZip(file){
+  if (!window.zip) { setStatus('Die ZIP-Funktion konnte nicht geladen werden. Lade die Seite neu.', 'err'); return; }
+  setStatus('Entpacke „' + file.name + '“ …');
+  const src = { id:newSourceId(), name:file.name, kind:'zip', blob:file, excluded:[], added:Date.now() };
+  let res;
+  try { res = await zipTracks(src); }
+  catch (e) {
+    setStatus('„' + file.name + '“ lässt sich nicht öffnen. Ist es eine gültige ZIP-Datei?', 'err');
+    return;
+  }
+  if (!res.tracks.length) {
+    setStatus(res.locked ? 'Die Titel in „' + file.name + '“ sind mit Passwort geschützt und lassen sich nicht entpacken.'
+                         : 'In „' + file.name + '“ sind keine Musikdateien (MP3, M4A, WAV …).', 'err');
+    return;
+  }
+  sources.set(src.id, src);
+  addTracks(res.tracks);
+  setStatus(res.tracks.length + ' Titel aus „' + file.name + '“ hinzugefügt.' + (res.locked ? ' ' + res.locked + ' mit Passwort geschützte übersprungen.' : ''), 'ok');
+  persistSource(src);
+}
+function removeTrack(id){
+  const i = P.tracks.findIndex(t => t.id === id); if (i < 0) return;
+  const wasCurrent = id === P.currentId;
+  const wasPlaying = wasCurrent && !audio.paused;
+  const nextId = wasCurrent && P.tracks.length > 1 ? neighborId(1) : null;
+  const removed = P.tracks.splice(i, 1)[0];
+  P.order = P.order.filter(x => x !== id);
+  const u = urlCache.get(id); if (u) { URL.revokeObjectURL(u); urlCache.delete(id); }
+  const src = sources.get(removed.sourceId);
+  if (src) {
+    const excl = loadExcluded();
+    if (!P.tracks.some(t => t.sourceId === src.id)) {
+      sources.delete(src.id); delete excl[src.id];
+      store.del(src.id).catch(() => {});
+    } else if (src.kind === 'zip') {
+      src.excluded = (src.excluded || []).concat(removed.key);
+      excl[src.id] = src.excluded;
+    }
+    saveExcluded(excl);
+  }
+  if (wasCurrent) {
+    P.token++;
+    audio.pause(); audio.removeAttribute('src'); try { audio.load(); } catch (e) {}
+    P.currentId = nextId;
+    if (wasPlaying && nextId != null) playTrack(nextId);
+  }
+  renderList(); renderPlayer();
+}
+function clearAll(){
+  P.token++;
+  audio.pause(); audio.removeAttribute('src'); try { audio.load(); } catch (e) {}
+  for (const u of urlCache.values()) URL.revokeObjectURL(u);
+  urlCache.clear();
+  P.tracks = []; P.order = []; P.currentId = null; P.failStreak = 0;
+  sources.clear(); saveExcluded({});
+  store.clear().catch(() => {});
+  setStatus('');
+  renderList(); renderPlayer();
+}
+
+let statusTimer = null;
+function setStatus(msg, kind){
+  const el = $('#status');
+  el.textContent = msg || '';
+  el.className = 'status' + (kind ? ' ' + kind : '');
+  clearTimeout(statusTimer);
+  if (kind === 'ok') statusTimer = setTimeout(() => { if (el.textContent === msg) { el.textContent = ''; el.className = 'status'; } }, 6000);
+}
+
+const ICON_PLAY = '<path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/>';
+const ICON_PAUSE = '<rect x="6" y="5" width="4.2" height="14" rx="1.2" fill="currentColor"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.2" fill="currentColor"/>';
+let lastIcon = '';
+function renderPlayer(){
+  const tr = currentTrack(), has = P.tracks.length > 0;
+  const playing = !audio.paused && hasRealSrc();
+  $('#npTitle').textContent = tr ? tr.title : has ? P.tracks[0].title : 'Keine Musik geladen';
+  const lbl = $('#npLabel');
+  lbl.textContent = playing ? 'Läuft' : has ? 'Bereit' : 'Musik';
+  lbl.classList.toggle('live', playing);
+  ['#prevBtn', '#playBtn', '#nextBtn'].forEach(s => { $(s).disabled = !has; });
+  const icon = playing ? ICON_PAUSE : ICON_PLAY;
+  if (icon !== lastIcon) { $('#playIcon').innerHTML = icon; lastIcon = icon; }
+  $('#playBtn').setAttribute('aria-label', playing ? 'Musik anhalten' : 'Musik abspielen');
+  $('#topInfo').textContent = has ? P.tracks.length + ' Titel' : '';
+  updateMediaSession(tr, playing);
+}
+let lastMetaId = null;
+function updateMediaSession(tr, playing){
+  if (!('mediaSession' in navigator)) return;
+  try {
+    const id = tr ? tr.id : null;
+    if (id !== lastMetaId) {
+      lastMetaId = id;
+      navigator.mediaSession.metadata = tr && window.MediaMetadata
+        ? new MediaMetadata({ title:tr.title, artist:'Intervall-Timer', album:tr.source, artwork:[{ src:'icons/icon-512.png', sizes:'512x512', type:'image/png' }] })
+        : null;
+    }
+    navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+  } catch (e) {}
+}
+function renderList(){
+  const has = P.tracks.length > 0;
+  $('#emptyPl').hidden = has;
+  $('#plWrap').hidden = !has;
+  $('#plCount').textContent = has ? ' · ' + P.tracks.length + ' Titel' : '';
+  const playing = !audio.paused && hasRealSrc();
+  const f = document.createDocumentFragment();
+  P.tracks.forEach((t, i) => {
+    const li = document.createElement('li');
+    const cur = t.id === P.currentId;
+    li.className = 'item' + (cur ? ' current' : '') + (t.failed ? ' failed' : '');
+    const n = document.createElement('span'); n.className = 'n';
+    if (cur && playing) n.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" aria-label="läuft"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></svg>';
+    else n.textContent = String(i + 1);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 't'; b.dataset.id = t.id;
+    const bt = document.createElement('b'); bt.textContent = t.title;
+    const sm = document.createElement('small'); sm.textContent = t.failed ? 'Format auf diesem Gerät nicht abspielbar' : t.source;
+    b.append(bt, sm);
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'x'; x.dataset.rm = t.id;
+    x.setAttribute('aria-label', t.title + ' entfernen');
+    x.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>';
+    li.append(n, b, x);
+    f.appendChild(li);
+  });
+  $('#list').replaceChildren(f);
+  const sw = $('#shuffleSw'); sw.setAttribute('aria-checked', String(S.shuffle));
+}
+
+/* ---------- Bedienelemente ---------- */
+const fieldShow = {};
+function settingsChanged(){
+  lastSegKey = '';
+  if (T.status === 'running' || T.status === 'paused') applyLevel(0.3);
+  render();
+}
+function parseField(str, f){
+  str = String(str).trim().replace(',', '.');
+  if (!str) return null;
+  if (f === 'rounds') { const n = parseInt(str, 10); return isFinite(n) ? n : null; }
+  const m = str.match(/^(\d+)\s*[:.]\s*(\d{1,2})$/);
+  if (m) return (+m[1]) * 60 + (+m[2]);
+  const n = parseFloat(str);
+  return isFinite(n) ? n : null;
+}
+document.querySelectorAll('.stepper').forEach(st => {
+  const f = st.dataset.field, inp = st.querySelector('input');
+  const show = () => { inp.value = f === 'rounds' ? String(S[f]) : fmt(S[f]); };
+  fieldShow[f] = show; show();
+  const set = v => { S[f] = Math.round(clamp(v, LIMITS[f][0], LIMITS[f][1])); show(); save(); settingsChanged(); };
+  const step = d => {
+    if (f === 'rounds') return set(S[f] + d);
+    const cur = S[f], stp = (d > 0 ? cur >= 120 : cur > 120) ? 15 : 5;
+    set(d > 0 ? Math.floor(cur / stp) * stp + stp : Math.ceil(cur / stp) * stp - stp);
+  };
+  inp.addEventListener('change', () => { const v = parseField(inp.value, f); if (v == null) show(); else set(v); });
+  inp.addEventListener('focus', () => { try { inp.select(); } catch (e) {} });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') inp.blur();
+    else if (e.key === 'ArrowUp') { e.preventDefault(); step(1); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); step(-1); }
+  });
+  st.querySelectorAll('button').forEach(b => {
+    const d = +b.dataset.d; let t1 = null, t2 = null;
+    const stop = () => { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
+    b.addEventListener('pointerdown', e => {
+      if (e.button > 0) return;
+      e.preventDefault(); stop(); step(d);
+      t1 = setTimeout(() => { t2 = setInterval(() => step(d), 70); }, 420);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, stop));
+    b.addEventListener('click', e => { if (e.detail === 0) step(d); });
+    b.addEventListener('contextmenu', e => e.preventDefault());
+  });
+});
+
+const chips = $('#toneChips');
+TONE_NAMES.forEach(([id, name]) => {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'chip'; b.setAttribute('role', 'radio'); b.dataset.tone = id; b.textContent = name;
+  chips.appendChild(b);
+});
+function renderChips(){ chips.querySelectorAll('.chip').forEach(b => b.setAttribute('aria-checked', String(b.dataset.tone === S.tone))); }
+chips.addEventListener('click', e => {
+  const b = e.target.closest('.chip'); if (!b) return;
+  S.tone = b.dataset.tone; save(); renderChips();
+  if (ensureAudio()) toneAt(ctx.currentTime + 0.02, 1);
+});
+
+let previewing = false;
+$('#previewBtn').addEventListener('click', () => {
+  if (previewing || !ensureAudio()) return;
+  unlockSpeech();
+  previewing = true;
+  const n = S.countdown, t0 = ctx.currentTime + 0.05;
+  for (let i = 0; i < n; i++) tickAt(t0 + i);
+  toneAt(t0 + n, 1);
+  $('#previewBtn').disabled = true; $('#previewTxt').textContent = 'Läuft …';
+  setTimeout(() => say('Los!'), n * 1000 + 80);
+  setTimeout(() => { previewing = false; $('#previewBtn').disabled = false; $('#previewTxt').textContent = 'Probe hören'; }, n * 1000 + 1100);
+});
+
+const voiceSw = $('#voiceSw');
+function renderVoice(){ voiceSw.setAttribute('aria-checked', String(S.voice && !!synth)); }
+if (!synth) { voiceSw.disabled = true; $('#voiceNote').textContent = 'Dein Browser unterstützt keine Sprachausgabe. Die Töne kommen trotzdem.'; }
+voiceSw.addEventListener('click', () => {
+  S.voice = !S.voice; save(); renderVoice();
+  if (S.voice) { unlockSpeech(); say('Los!'); }
+});
+
+const cdCtl = $('#cdCtl');
+function renderCd(){ cdCtl.querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', String(+b.dataset.v === S.countdown))); }
+cdCtl.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  S.countdown = +b.dataset.v; save(); renderCd();
+  if (S.countdown && ensureAudio()) tickAt(ctx.currentTime + 0.02);
+});
+
+const vol = $('#pauseVol');
+function renderVol(){ vol.value = S.pauseVol; $('#pauseVolVal').textContent = S.pauseVol + ' %'; vol.style.setProperty('--val', S.pauseVol + '%'); }
+vol.addEventListener('input', () => {
+  S.pauseVol = +vol.value; renderVol(); save();
+  ensureAudio();
+  const pauseLike = (T.status === 'running' || T.status === 'paused') && (T.phase === 'rest' || T.phase === 'prep');
+  if (pauseLike) setMusicLevel(S.pauseVol / 100, 0.08);
+  else if (!audio.paused && hasRealSrc()) {
+    setMusicLevel(S.pauseVol / 100, 0.08);
+    clearTimeout(levelPreviewTimer);
+    levelPreviewTimer = setTimeout(() => applyLevel(0.4), 1500);
+  }
+});
+
+$('#shuffleSw').addEventListener('click', () => { S.shuffle = !S.shuffle; save(); rebuildOrder(); renderList(); if (P.currentId != null) prepare(neighborId(1)); });
+$('#clearBtn').addEventListener('click', clearAll);
+$('#list').addEventListener('click', e => {
+  const rm = e.target.closest('[data-rm]');
+  if (rm) { removeTrack(+rm.dataset.rm); return; }
+  const t = e.target.closest('[data-id]');
+  if (t) {
+    ensureAudio(); unlockMedia();
+    const id = +t.dataset.id, tr = findTrack(id);
+    if (tr) tr.failed = false;
+    P.failStreak = 0;
+    if (id === P.currentId && hasRealSrc()) togglePlay(); else playTrack(id);
+  }
+});
+$('#zipInput').addEventListener('change', e => { const fl = Array.from(e.target.files || []); e.target.value = ''; addFiles(fl); });
+$('#fileInput').addEventListener('change', e => { const fl = Array.from(e.target.files || []); e.target.value = ''; addFiles(fl); });
+['#zipInput', '#fileInput'].forEach(s => $(s).addEventListener('click', () => { ensureAudio(); unlockMedia(); unlockSpeech(); }));
+
+$('#mainBtn').addEventListener('click', () => {
+  ensureAudio(); unlockMedia(); unlockSpeech();
+  if (T.status === 'running') halt();
+  else if (T.status === 'paused') resume();
+  else startFresh();
+});
+$('#resetBtn').addEventListener('click', resetTimer);
+$('#skipBtn').addEventListener('click', () => { ensureAudio(); skipPhase(); });
+$('#playBtn').addEventListener('click', togglePlay);
+$('#prevBtn').addEventListener('click', () => skipTrack(-1));
+$('#nextBtn').addEventListener('click', () => skipTrack(1));
+
+document.addEventListener('keydown', e => {
+  if (e.code !== 'Space' || e.repeat) return;
+  const tag = (document.activeElement && document.activeElement.tagName) || '';
+  if (/^(INPUT|BUTTON|TEXTAREA|SELECT|LABEL)$/.test(tag)) return;
+  e.preventDefault(); $('#mainBtn').click();
+});
+
+let dragDepth = 0;
+document.addEventListener('dragenter', e => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) { dragDepth++; document.body.classList.add('dropping'); } });
+document.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) document.body.classList.remove('dropping'); });
+document.addEventListener('dragover', e => { e.preventDefault(); });
+document.addEventListener('drop', e => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dropping'); if (e.dataTransfer) addFiles(e.dataTransfer.files); });
+
+if (window.zip && zip.configure) { try { zip.configure({ useWebWorkers:false }); } catch (e) {} }
+
+/* Steuerung vom Sperrbildschirm und von Kopfhörern */
+if ('mediaSession' in navigator) {
+  const h = (a, f) => { try { navigator.mediaSession.setActionHandler(a, f); } catch (e) {} };
+  h('play', () => { if (audio.paused || !hasRealSrc()) togglePlay(); });
+  h('pause', () => { if (!audio.paused && hasRealSrc()) togglePlay(); });
+  h('nexttrack', () => skipTrack(1));
+  h('previoustrack', () => skipTrack(-1));
+}
+
+/* Als App installieren */
+const isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const INST_KEY = 'intervall-install-ausgeblendet';
+let deferredPrompt = null;
+function installHidden(){ try { return localStorage.getItem(INST_KEY) === '1'; } catch (e) { return false; } }
+function showInstall(html, withButton){
+  if (isStandalone || installHidden()) return;
+  $('#installTxt').innerHTML = html;
+  $('#installGo').hidden = !withButton;
+  $('#installBox').hidden = false;
+}
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if (isIOS) showInstall('<b>Als App nutzen:</b> Tippe im Browser auf Teilen und dann auf „Zum Home-Bildschirm“. Der Timer startet dann wie eine App und läuft auch offline.', false);
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); deferredPrompt = e;
+  showInstall('<b>Als App nutzen:</b> Installiere den Timer auf deinem Startbildschirm. Er läuft dann auch offline.', true);
+});
+$('#installGo').addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  try { await deferredPrompt.userChoice; } catch (e) {}
+  deferredPrompt = null; $('#installBox').hidden = true;
+});
+$('#installHide').addEventListener('click', () => { $('#installBox').hidden = true; try { localStorage.setItem(INST_KEY, '1'); } catch (e) {} });
+window.addEventListener('appinstalled', () => { $('#installBox').hidden = true; });
+
+/* Offline-Betrieb */
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
+
+renderChips(); renderVoice(); renderCd(); renderVol(); renderList(); renderPlayer(); render();
+restoreMusic();
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 /* Service Worker: hält die App offline verfügbar. Bei Änderungen VERSION erhöhen. */
-const VERSION = 'intervall-v1';
+const VERSION = 'intervall-v2';
 const FONT_CACHE = 'intervall-fonts';
 const SHELL = [
   './',

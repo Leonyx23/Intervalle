@@ -364,6 +364,10 @@ function ensureAudio(){
     if (!AC) return null;
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
     try { ctx = new AC(); } catch (e) { return null; }
+    ctx.onstatechange = () => {
+      if (ctx.state !== 'running' && P.want && T.status !== 'paused' && document.visibilityState === 'visible')
+        setTimeout(() => { if (ctx.state !== 'running') ctx.resume().catch(() => {}); }, 300);
+    };
     master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination);
     musicGain = ctx.createGain(); musicGain.gain.value = 1; musicGain.connect(master);
     try { mediaSrc = ctx.createMediaElementSource(audio); mediaSrc.connect(musicGain); } catch (e) { mediaSrc = null; }
@@ -440,9 +444,14 @@ function say(text){
     synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'de-DE'; if (deVoice) u.voice = deVoice; u.rate = 1.05; u.volume = 1;
+    const after = () => setTimeout(recoverMusic, 150);
+    u.onend = after; u.onerror = after;
+    lastSpeech = Date.now();
     synth.speak(u);
+    setTimeout(recoverMusic, 1600);
   } catch (e) {}
 }
+let lastSpeech = 0;
 function unlockSpeech(){
   if (!synth || speechUnlocked) return;
   speechUnlocked = true;
@@ -478,6 +487,7 @@ function enter(phase, round, at, quiet){
     else if (phase === 'rest') { playSignal('stop'); say('Stopp!'); }
   }
   applyLevel(phase === 'prep' ? 0.05 : 0.6);
+  if (phase === 'work' || phase === 'rest') setTimeout(recoverMusic, 60);
 }
 
 function startFresh(){
@@ -493,7 +503,7 @@ function halt(){
   if (T.status !== 'running') return;
   T.left = Math.max(0, T.end - performance.now());
   T.status = 'paused';
-  P.resumeOnContinue = !audio.paused && hasRealSrc();
+  P.resumeOnContinue = P.want || (!audio.paused && hasRealSrc());
   audio.pause();
   if (synth) try { synth.cancel(); } catch (e) {}
   keepAwake(false);
@@ -503,13 +513,19 @@ function resume(){
   if (T.status !== 'paused') return;
   T.end = performance.now() + T.left;
   T.status = 'running';
-  if (P.resumeOnContinue) audio.play().catch(() => {});
+  if (P.resumeOnContinue && P.tracks.length) {
+    P.want = true;
+    if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+    if (hasRealSrc()) { applyLevel(0.05); audio.play().catch(() => {}); }
+    else playTrack(P.currentId != null ? P.currentId : P.order[0]);
+  }
   keepAwake(true);
   render();
 }
 function resetTimer(){
   T.status = 'idle'; T.phase = 'ready'; T.round = 0;
   clearTimeout(fadeTimer);
+  P.want = false;
   audio.pause();
   setMusicLevel(1, 0.05);
   if (synth) try { synth.cancel(); } catch (e) {}
@@ -556,6 +572,7 @@ document.addEventListener('visibilitychange', () => {
     if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
     if (T.status === 'running') keepAwake(true);
     tick();
+    recoverMusic();
   }
 });
 
@@ -644,7 +661,7 @@ function render(){
 
 /* ---------- Musik ---------- */
 const AUDIO_EXT = { mp3:'audio/mpeg', m4a:'audio/mp4', mp4:'audio/mp4', aac:'audio/aac', wav:'audio/wav', ogg:'audio/ogg', oga:'audio/ogg', opus:'audio/ogg', flac:'audio/flac', webm:'audio/webm', aif:'audio/aiff', aiff:'audio/aiff', caf:'audio/x-caf' };
-const P = { tracks:[], order:[], currentId:null, token:0, failStreak:0, failedToken:-1, nextId:1, resumeOnContinue:false };
+const P = { tracks:[], order:[], currentId:null, token:0, failStreak:0, failedToken:-1, nextId:1, resumeOnContinue:false, want:false, loading:false };
 const urlCache = new Map(), pending = new Map();
 let fadeTimer = null, levelPreviewTimer = null;
 
@@ -697,20 +714,23 @@ async function playTrack(id){
   const tr = findTrack(id); if (!tr) return;
   clearTimeout(fadeTimer);
   P.currentId = id;
+  P.want = true; P.loading = true;
   const token = ++P.token;
   renderPlayer(); renderList();
   let url;
   try { url = await urlFor(tr); }
-  catch (e) { if (token === P.token) trackFailed(token); return; }
+  catch (e) { if (token === P.token) { P.loading = false; trackFailed(token); } return; }
   if (token !== P.token) return;
   audio.src = url;
   applyLevel(0.05);
-  try { await audio.play(); P.failStreak = 0; }
+  try { await audio.play(); if (token === P.token) P.failStreak = 0; }
   catch (e) {
     if (token !== P.token) return;
-    if (e && e.name === 'NotAllowedError') setStatus('Tippe auf Abspielen, damit die Musik startet.');
+    P.loading = false;
+    if (e && e.name === 'NotAllowedError') { P.want = false; setStatus('Tippe auf Abspielen, damit die Musik startet.'); }
     else if (!e || e.name !== 'AbortError') trackFailed(token);
   }
+  if (token === P.token) P.loading = false;
   renderPlayer(); renderList();
   trimCache(); prepare(neighborId(1));
 }
@@ -721,6 +741,7 @@ function trackFailed(token){
   P.failStreak++;
   renderList();
   if (P.failStreak >= P.tracks.length) {
+    P.want = false; P.loading = false;
     audio.pause();
     setStatus('Diese Titel kann dein Gerät nicht abspielen. Am sichersten sind MP3 und M4A.', 'err');
     renderPlayer();
@@ -731,15 +752,26 @@ function trackFailed(token){
 audio.addEventListener('ended', () => { if (hasRealSrc()) playTrack(neighborId(1)); });
 audio.addEventListener('error', () => { if (hasRealSrc()) trackFailed(P.token); });
 audio.addEventListener('play', () => { renderPlayer(); renderList(); });
-audio.addEventListener('pause', () => { renderPlayer(); renderList(); });
+audio.addEventListener('pause', () => {
+  renderPlayer(); renderList();
+  if (P.want && Date.now() - lastSpeech < 5000) setTimeout(recoverMusic, 400);
+});
 
 function musicForTimer(){
   if (!P.tracks.length) return;
+  P.want = true;
   if (!audio.paused && hasRealSrc()) { applyLevel(0.3); return; }
   if (P.currentId != null && hasRealSrc()) { applyLevel(0.05); audio.play().catch(() => {}); }
   else playTrack(P.currentId != null ? P.currentId : P.order[0]);
 }
+function recoverMusic(){
+  if (!P.want || P.loading || !hasRealSrc() || audio.ended) return;
+  if (T.status === 'paused' || T.status === 'done') return;
+  if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+  if (audio.paused) audio.play().catch(() => {});
+}
 function finishMusic(){
+  P.want = false;
   if (audio.paused) { setMusicLevel(1, 0.05); return; }
   setMusicLevel(0, 3);
   clearTimeout(fadeTimer);
@@ -749,8 +781,9 @@ function togglePlay(){
   ensureAudio(); unlockMedia();
   if (!P.tracks.length) return;
   clearTimeout(fadeTimer);
-  if (!audio.paused && hasRealSrc()) { audio.pause(); P.resumeOnContinue = false; return; }
+  if (!audio.paused && hasRealSrc()) { P.want = false; audio.pause(); P.resumeOnContinue = false; return; }
   if (T.status === 'paused') P.resumeOnContinue = true;
+  P.want = true;
   if (P.currentId != null && hasRealSrc()) { applyLevel(0.05); audio.play().catch(() => {}); }
   else playTrack(P.currentId != null ? P.currentId : P.order[0]);
 }
@@ -930,6 +963,7 @@ function removeTrack(id){
   }
   if (wasCurrent) {
     P.token++;
+    if (!(wasPlaying && nextId != null)) P.want = false;
     audio.pause(); audio.removeAttribute('src'); try { audio.load(); } catch (e) {}
     P.currentId = nextId;
     if (wasPlaying && nextId != null) playTrack(nextId);
@@ -938,6 +972,7 @@ function removeTrack(id){
 }
 function clearAll(){
   P.token++;
+  P.want = false;
   audio.pause(); audio.removeAttribute('src'); try { audio.load(); } catch (e) {}
   for (const u of urlCache.values()) URL.revokeObjectURL(u);
   urlCache.clear();

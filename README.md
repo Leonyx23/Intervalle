@@ -10,6 +10,7 @@ Intervall-Timer mit Musik, als App für Handy und Computer.
 - **Musik:** ZIP-Dateien mit Songs öffnen (werden direkt auf dem Gerät entpackt) oder einzelne Songs hinzufügen
 - **Playlist:** Titel antippen, entfernen, zufällige Reihenfolge
 - **Musik in der Pause:** Lautstärke per Schieberegler von 0 bis 100 % (gilt auch im Vorlauf)
+- **Musik aus anderer App:** Schalter für Apple Music, Spotify oder Radio. Die Musik läuft in der anderen App weiter, der Timer spielt Töne und Ansage darüber. Lautstärke und Titel werden dann in der Musik-App gesteuert.
 - **Signal:** fünf Töne (Glocke, Piep, Pfiff, Gong, Holz) mit „Probe hören“
 - **Ansage:** „Los“ und „Stopp“ beim Wechsel, abschaltbar
 - **Countdown-Ticken:** 3 oder 5 Sekunden vor jedem Wechsel
